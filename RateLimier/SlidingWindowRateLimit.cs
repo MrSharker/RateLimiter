@@ -12,7 +12,7 @@ namespace RateLimiter
 
         private readonly TimeSpan _timeWindow;
 
-        private readonly Queue<DateTime> _timestamps = new();
+        private readonly List<DateTime> _timestamps = new();
 
         private readonly SemaphoreSlim _semaphore = new(1, 1);
 
@@ -31,7 +31,7 @@ namespace RateLimiter
 
                 if (_timestamps.Count >= _maxRequests)
                 {
-                    var oldest = _timestamps.Peek();
+                    var oldest = _timestamps.Last();
                     var waitTime = (oldest + _timeWindow) - DateTime.UtcNow;
                     if (waitTime > TimeSpan.Zero)
                     {
@@ -39,7 +39,23 @@ namespace RateLimiter
                     }
                 }
 
-                _timestamps.Enqueue(DateTime.UtcNow);
+                _timestamps.Add(DateTime.UtcNow);
+            }
+            finally
+            {
+                _semaphore.Release();
+            }
+        }
+
+        public async Task RollbackLastReservationAsync()
+        {
+            await _semaphore.WaitAsync();
+            try
+            {
+                if (_timestamps.Count > 0)
+                {
+                    _timestamps.RemoveAt(_timestamps.Count - 1);
+                }
             }
             finally
             {
@@ -51,10 +67,7 @@ namespace RateLimiter
         private void CleanupOldTimestamps()
         {
             var threshold = DateTime.UtcNow - _timeWindow;
-            while (_timestamps.Count > 0 && _timestamps.Peek() < threshold)
-            {
-                _timestamps.Dequeue();
-            }
+            _timestamps.RemoveAll(t => t < threshold);
         }
         #endregion
     }
