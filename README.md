@@ -11,6 +11,8 @@ Full asynchronous and thread-safe implementation was implemented, as required by
 ## Architecture
 
 ### RateLimiter
+- Uses `SemaphoreSlim` to protect from races during concurrent access.
+- Checks if slots are available
 - Reserves slots for all rules rate limites before executing the action.
 - If the limit is exceeded, waits the required time, or throws `TimeoutException` if the wait exceeds `maxWaitTime`.
 - **`maxWaitTime`** limits the total wait time, preventing tasks from hanging in case of a long block.
@@ -22,8 +24,6 @@ Full asynchronous and thread-safe implementation was implemented, as required by
 - Rate limiting based on a **sliding window** approach.
 - Uses `SemaphoreSlim` to protect the queue from races during concurrent access.
 
-### RateLimitExceededException
-- A specialized exception that specifies how long it takes to safely repeat the request.
 
 ---
 
