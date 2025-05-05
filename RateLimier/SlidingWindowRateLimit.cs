@@ -12,7 +12,7 @@ namespace RateLimiter
 
         private readonly TimeSpan _timeWindow;
 
-        private readonly List<DateTime> _timestamps = new();
+        private readonly Queue<DateTime> _timestamps = new();
 
         private readonly SemaphoreSlim _semaphore = new(1, 1);
 
@@ -22,7 +22,7 @@ namespace RateLimiter
             _timeWindow = timeWindow;
         }
 
-        public async Task ReserveSlotAsync()
+        public async Task<TimeSpan?> CanReserveAfterAsync()
         {
             await _semaphore.WaitAsync();
             try
@@ -31,15 +31,15 @@ namespace RateLimiter
 
                 if (_timestamps.Count >= _maxRequests)
                 {
-                    var oldest = _timestamps.Last();
+                    var oldest = _timestamps.Peek();
                     var waitTime = (oldest + _timeWindow) - DateTime.UtcNow;
                     if (waitTime > TimeSpan.Zero)
                     {
-                        throw new RateLimitExceededException(waitTime);
+                        return waitTime;
                     }
                 }
 
-                _timestamps.Add(DateTime.UtcNow);
+                return null;
             }
             finally
             {
@@ -47,15 +47,13 @@ namespace RateLimiter
             }
         }
 
-        public async Task RollbackLastReservationAsync()
+        public async Task ReserveSlotAsync()
         {
             await _semaphore.WaitAsync();
             try
             {
-                if (_timestamps.Count > 0)
-                {
-                    _timestamps.RemoveAt(_timestamps.Count - 1);
-                }
+                CleanupOldTimestamps();
+                _timestamps.Enqueue(DateTime.UtcNow);
             }
             finally
             {
@@ -67,7 +65,10 @@ namespace RateLimiter
         private void CleanupOldTimestamps()
         {
             var threshold = DateTime.UtcNow - _timeWindow;
-            _timestamps.RemoveAll(t => t < threshold);
+            while (_timestamps.Count > 0 && _timestamps.Peek() < threshold)
+            {
+                _timestamps.Dequeue();
+            }
         }
         #endregion
     }

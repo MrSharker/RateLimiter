@@ -192,57 +192,5 @@ namespace RateLimiter.Tests
             // Assert
             Assert.Contains("Exceeded maximum wait time", exception.Message);
         }
-
-        [Fact]
-        public async Task Perform_ShouldRollback_WhenReservationFails()
-        {
-            // Arrange
-            var goodRule = new FakeGoodRule();
-            var badRule = new FakeBadRule();
-
-            var rateLimiter = new RateLimiter<string>(
-                async arg => await Task.CompletedTask,
-                new List<IRateLimitRule> { goodRule, badRule },
-                TimeSpan.FromSeconds(2)
-            );
-
-            // Act & Assert
-            await Assert.ThrowsAsync<TimeoutException>(() => rateLimiter.Perform("TestRequest"));
-
-            Assert.Equal(goodRule.ReserveCalled, goodRule.RollbackCalled);
-        }
-
-        #region private
-        private class FakeGoodRule : IRateLimitRule
-        {
-            public int ReserveCalled { get; private set; }
-            public int RollbackCalled { get; private set; }
-
-            public Task ReserveSlotAsync()
-            {
-                ReserveCalled++;
-                return Task.CompletedTask;
-            }
-
-            public Task RollbackLastReservationAsync()
-            {
-                RollbackCalled++;
-                return Task.CompletedTask;
-            }
-        }
-
-        private class FakeBadRule : IRateLimitRule
-        {
-            public Task ReserveSlotAsync()
-            {
-                throw new RateLimitExceededException(TimeSpan.FromMilliseconds(100));
-            }
-
-            public Task RollbackLastReservationAsync()
-            {
-                return Task.CompletedTask;
-            }
-        }
-        #endregion
     }
 }

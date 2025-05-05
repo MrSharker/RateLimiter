@@ -8,7 +8,7 @@ namespace RateLimiter
 {
     public interface IRateLimitRule
     {
+        Task<TimeSpan?> CanReserveAfterAsync();
         Task ReserveSlotAsync();
-        Task RollbackLastReservationAsync();
     }
 }

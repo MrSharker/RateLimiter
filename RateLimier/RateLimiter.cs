@@ -14,6 +14,8 @@ namespace RateLimiter
 
         private readonly TimeSpan? _maxWaitTime;
 
+        private readonly SemaphoreSlim _semaphore = new(1, 1);
+
         public RateLimiter(Func<TArg, Task> action, List<IRateLimitRule> rateLimitRules, TimeSpan? maxWaitTime = null)
         {
             _action = action;
@@ -23,39 +25,50 @@ namespace RateLimiter
 
         public async Task Perform(TArg arg)
         {
-            var startTime = DateTime.UtcNow;
+            var deadline = _maxWaitTime.HasValue ? DateTime.UtcNow + _maxWaitTime.Value : (DateTime?)null;
             while (true)
             {
-                if (_maxWaitTime.HasValue && DateTime.UtcNow - startTime > _maxWaitTime.Value)
+                if (deadline.HasValue && DateTime.UtcNow > deadline.Value)
                 {
-                    throw new TimeoutException($"Exceeded maximum wait time {_maxWaitTime.Value.TotalSeconds:F2} seconds.");
+                    throw new TimeoutException($"Exceeded maximum wait time of {_maxWaitTime.Value.TotalSeconds:F2} seconds.");
                 }
-                var reservedRules = new List<IRateLimitRule>();
+
+                await _semaphore.WaitAsync();
+
                 try
                 {
+                    var delays = new List<TimeSpan>();
+
+                    foreach (var rule in _rateLimitRules)
+                    {
+                        var waitTime = await rule.CanReserveAfterAsync();
+                        if (waitTime.HasValue)
+                            delays.Add(waitTime.Value);
+                    }
+                    if (delays.Any())
+                    {
+                        var delay = delays.Max();
+
+                        if (deadline.HasValue && DateTime.UtcNow + delay > deadline.Value)
+                            throw new TimeoutException($"Exceeded maximum wait time {_maxWaitTime.Value.TotalSeconds:F2} seconds. A retry is possible after {delay.TotalSeconds:F2} seconds.");
+
+                        Console.WriteLine($"Waiting for {delay.TotalSeconds:F2} seconds before retrying.");
+                        await Task.Delay(delay);
+                        continue;
+                    }
+
                     foreach (var rule in _rateLimitRules)
                     {
                         await rule.ReserveSlotAsync();
-                        reservedRules.Add(rule);
                     }
 
                     await _action(arg);
 
                     return;
                 }
-                catch (RateLimitExceededException ex)
+                finally
                 {
-                    foreach (var reservedRule in reservedRules)
-                    {
-                        await reservedRule.RollbackLastReservationAsync();
-                    }
-                    if (_maxWaitTime.HasValue && ex.RetryAfter > _maxWaitTime.Value)
-                    {
-                        throw new TimeoutException($"Exceeded maximum wait time {_maxWaitTime.Value.TotalSeconds:F2} seconds. A retry is possible after {ex.RetryAfter.TotalSeconds:F2} seconds.");
-                    }
-
-                    Console.WriteLine(ex.Message);
-                    await Task.Delay(ex.RetryAfter);
+                    _semaphore.Release();
                 }
             }
         }
